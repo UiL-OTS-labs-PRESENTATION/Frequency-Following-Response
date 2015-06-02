@@ -1,0 +1,162 @@
+#--------- PCL ---------
+
+#################################################
+### METHODS / SUBROUTINES
+#################################################
+
+sub
+   display( string message , int wait)
+begin
+   display_window.erase();
+   display_window.draw_text( message );
+	wait_interval(wait);
+end;
+
+sub
+	trial generate_new_trial (int delay_arg, sound sound0, int trial_duration_arg, int port_code_arg, string event_code_arg, string description_arg)
+begin
+	trial item = new trial;
+	item.set_type(fixed);													# Be independent of respones but solely based on duration
+	item.set_start_delay(delay_arg);
+	
+	stimulus_event event = item.add_stimulus_event(sound0);
+	event.set_port_code(port_code_arg);
+	event.set_event_code(event_code_arg);
+	event.get_stimulus().set_description(description_arg);
+	
+	item.set_duration(trial_duration_arg);
+	
+	return item;
+end;
+
+#################################################
+# Get and set values from parameters
+#################################################
+#----------------------------------  NUMBER OF SWEEPS
+int total_number_of_trials = parameter_manager.get_int("Number of Trials",3000);
+
+#---------------------------------- SOUND SETTINGS
+#SOUNDS
+array<sound> sounds_odd[0];
+parameter_manager.get_sounds("SoundFiles", sounds_odd);
+array<sound> sounds_even[0];
+parameter_manager.get_sounds("SoundFiles Inverse", sounds_even);
+
+#MARKERS
+array<int> markers_odd[0];
+parameter_manager.get_ints("Markers", markers_odd);
+array<int> markers_even[0];
+parameter_manager.get_ints("Markers Inverse", markers_even);
+
+#----------------------------------	TIMING SETTINGS
+array<int> trial_durations[0];
+parameter_manager.get_ints("Trial Durations", trial_durations);
+
+array<int> delays[3] = {11, 22, 33} ;
+parameter_manager.get_ints("Intertrial Jitter", delays, false);
+
+#----------------------------------	OTHER INITIATIONS
+int number_of_blocks = sounds_odd.count();
+int number_of_trials_per_block = total_number_of_trials/number_of_blocks;
+
+output_port port = output_port_manager.get_port( 1 );
+
+array<trial> test_trials[number_of_blocks][number_of_trials_per_block];
+
+#----------------------------------
+# ------------ FINAL CHECK --------
+#----------------------------------
+
+if(
+	sounds_odd.count() != sounds_even.count()
+	||
+	sounds_odd.count() != markers_odd.count()
+	||
+	sounds_odd.count() != markers_even.count()
+	||
+	sounds_odd.count() != trial_durations.count()
+	) then
+		exit("Parameters are not configured correctly. Make sure the number of markers, trial_durations and sounds are equal!");
+end;
+
+#################################################
+# Generate and load trials
+#################################################
+loop	int iblock = 1 until iblock > number_of_blocks begin
+	
+	bool select_inverse_sound = false;
+	
+	loop	int itrial = 1 until itrial > number_of_trials_per_block begin
+		
+		sound selected_sound; 
+		int 	selected_marker;
+		string selected_event_code;
+		string selected_description;
+		
+		if(!select_inverse_sound) then
+			selected_sound = sounds_odd[iblock];
+			selected_marker = markers_odd[iblock];
+			selected_event_code = selected_sound.get_wavefile().filename() + ";" + "Normal";
+			selected_description = "Normal";
+		else
+			selected_sound = sounds_even[iblock];
+			selected_marker = markers_even[iblock];
+			selected_event_code = selected_sound.get_wavefile().filename() + ";" + "Inverse";;
+			selected_description = "Inverse";
+		end;
+				
+		test_trials[iblock][itrial] = generate_new_trial(
+			delays[random(1,delays.count())], 
+			selected_sound,
+			trial_durations[iblock],
+			selected_marker,
+			selected_event_code,
+			selected_description
+		);
+
+		select_inverse_sound = !select_inverse_sound;
+		itrial = itrial + 1;
+	end;
+	
+	iblock = iblock + 1;
+end;
+
+#################################################
+# Preview any relevant data to the experimenter.
+#################################################
+display("Number of blocks: " + string(number_of_blocks), 1000);
+display("Trials per block: " + string(number_of_trials_per_block), 1000);
+
+int total_duration = 0;
+
+loop	int iduration = 1 until iduration > trial_durations.count() begin
+	total_duration = total_duration + ( trial_durations[iduration] * number_of_trials_per_block );
+	iduration = iduration + 1;
+end;
+
+display("Approximate Run Time: " + string(total_duration/60000) + " minute(s)", 0);
+
+
+#################################################
+# Present trials
+#################################################
+
+# Mark start.
+wait_interval(300); port.send_code(parameter_manager.get_int("Start Marker")); wait_interval(300);
+
+default.present();
+
+loop	int iblock = 1 until iblock > number_of_blocks begin
+
+	loop	int itrial = 1 until itrial > number_of_trials_per_block begin
+	
+		test_trials[iblock][itrial].present();
+		
+		itrial = itrial + 1;
+	end;
+	
+	iblock = iblock + 1;
+end;
+
+# Mark end.
+wait_interval(300); port.send_code(parameter_manager.get_int("Stop Marker"))
